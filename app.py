@@ -31,7 +31,6 @@ if uploaded_file:
         
         dados_lista = []
         for aba in abas_validas:
-            # Lê a aba completa sem pular nada primeiro
             df_raw = pd.read_excel(uploaded_file, sheet_name=aba, header=None)
             
             # PROCURA A LINHA ONDE COMEÇA A TABELA (Procura a palavra DATA)
@@ -42,9 +41,7 @@ if uploaded_file:
                     break
             
             if linha_inicio is not None:
-                # Lê novamente a partir da linha correta
                 df = pd.read_excel(uploaded_file, sheet_name=aba, skiprows=linha_inicio + 1, header=None)
-                # Pega os nomes das colunas da linha que encontramos
                 colunas = df_raw.iloc[linha_inicio].values
                 df.columns = [str(c).strip().upper() for c in colunas]
                 
@@ -54,14 +51,16 @@ if uploaded_file:
                 if 'DATA' in df.columns and 'VALOR' in df.columns:
                     col_desc = next((c for c in df.columns if 'DESC' in c), None)
                     df = df[['DATA', 'VALOR', (col_desc if col_desc else 'DATA')]].copy()
-                    if col_desc: df = df.rename(columns={col_desc: 'DESCRIÇÃO'})
                     
-                    # Limpa linhas vazias e converte valores
+                    if col_desc and 'DESCRIÇÃO' not in df.columns:
+                        df = df.rename(columns={col_desc: 'DESCRIÇÃO'})
+                    elif 'DESCRIÇÃO' not in df.columns:
+                        df['DESCRIÇÃO'] = "Sem descrição"
+                    
                     df = df.dropna(subset=['VALOR'])
                     df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce')
-                    df = df.dropna(subset=['VALOR']) # Remove se o valor virou NaN
+                    df = df.dropna(subset=['VALOR'])
                     
-                    # Monta a data real
                     try:
                         partes_aba = aba.split('-')
                         nome_mes = partes_aba[0].strip()[:3].upper()
@@ -86,7 +85,7 @@ if uploaded_file:
             m1, m2, m3 = st.columns(3)
             m1.metric("Receitas", f"R$ {receitas:,.2f}")
             m2.metric("Despesas", f"R$ {abs(despesas):,.2f}", delta_color="inverse")
-            m3.metric("Saldo Líquido", f"R$ {(receitas + despesas):,.2f}")
+            m3.metric("Saldo", f"R$ {(receitas + despesas):,.2f}")
 
             st.markdown("---")
             g1, g2 = st.columns(2)
@@ -97,14 +96,15 @@ if uploaded_file:
                 st.plotly_chart(fig_pie, use_container_width=True)
             with g2:
                 st.subheader("Fluxo Diário")
-                df_graf = df_mes.groupby(df_mes['DATA_REAL'].dt.day)['VALOR'].sum().reset_index()
-                fig_bar = px.bar(df_graf, x='DATA_REAL', y='VALOR', color='VALOR', color_continuous_scale=['#ff5252', '#00c853'])
+                df_mes['DIA_GRAF'] = df_mes['DATA_REAL'].dt.day
+                df_graf = df_mes.groupby('DIA_GRAF')['VALOR'].sum().reset_index()
+                fig_bar = px.bar(df_graf, x='DIA_GRAF', y='VALOR', color='VALOR', color_continuous_scale=['#ff5252', '#00c853'])
                 st.plotly_chart(fig_bar, use_container_width=True)
 
             st.subheader("📝 Detalhes dos Lançamentos")
             df_tab = df_mes.copy()
-            df_tab['DATA_FORMAT'] = df_tab['DATA_REAL'].dt.strftime('%d/%m/%Y')
-            st.dataframe(df_tab[['DATA_FORMAT', 'DESCRIÇÃO', 'CATEGORIA', 'VALOR']].sort_values('DATA_FORMAT'), use_container_width=True)
+            df_tab['DATA'] = df_tab['DATA_REAL'].dt.strftime('%d/%m/%Y')
+            st.dataframe(df_tab[['DATA', 'DESCRIÇÃO', 'CATEGORIA', 'VALOR']].sort_values('DATA'), use_container_width=True)
         else:
             st.error("Não encontrei a tabela de lançamentos. Verifique se existe a coluna 'DATA'.")
     except Exception as e:
