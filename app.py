@@ -5,7 +5,7 @@ from datetime import datetime
 
 st.set_page_config(page_title="Financeiro Léo", layout="wide")
 
-st.title("📊 Dashboard Financeiro Inteligente - Léo")
+st.title("📊 Dashboard Financeiro com Saldo Inicial - Léo")
 
 meses_map = {
     'JAN': 1, 'FEV': 2, 'MAR': 3, 'ABR': 4, 'MAI': 5, 'JUN': 6,
@@ -26,7 +26,7 @@ def identificar_tipo(desc):
     desc = str(desc).upper()
     transfer_keywords = ['TRANSF', 'TRANSFERENCIA', 'TRANSFERÊNCIA', 'TED', 'DOC', 'PIX']
     fatura_keywords = ['FATURA', 'CARTAO', 'CARTÃO', 'CREDITO', 'NUBANK', 'ITAU', 'SANTANDER']
-    resumo_keywords = ['VALOR FINAL', 'TOTAL', 'SALDO', 'PAGO', 'PAGO', 'PAGAR', 'ATRASADO']
+    resumo_keywords = ['VALOR FINAL', 'TOTAL', 'SALDO', 'PAGO', 'PAGAR', 'ATRASADO']
 
     if any(k in desc for k in resumo_keywords):
         return 'Resumo/Total'
@@ -45,65 +45,86 @@ if uploaded_file:
         abas_validas = [s for s in xls.sheet_names if '-' in s]
 
         dados_lista = []
+        saldos_iniciais = {}
         for aba in abas_validas:
             df_raw = pd.read_excel(uploaded_file, sheet_name=aba, header=None)
 
-            linha_inicio = None
+            # Detecta saldo inicial: valores numéricos antes da linha "DATA"
+            linha_data = None
             for i, row in df_raw.iterrows():
                 if "DATA" in [str(v).strip().upper() for v in row.values]:
-                    linha_inicio = i
+                    linha_data = i
                     break
+            if linha_data is None:
+                continue
 
-            if linha_inicio is not None:
-                df = pd.read_excel(uploaded_file, sheet_name=aba, skiprows=linha_inicio + 1, header=None)
-                colunas = [str(c).strip().upper() for c in df_raw.iloc[linha_inicio].values]
-                df.columns = colunas
-                df = df.loc[:, ~df.columns.duplicated()]
+            # Procura saldo inicial na parte acima da linha DATA
+            saldo_inicial = None
+            for i in range(linha_data):
+                row = df_raw.iloc[i]
+                for val in row:
+                    if isinstance(val, (int, float)) and val > 0:
+                        saldo_inicial = val
+                        break
+                if saldo_inicial is not None:
+                    break
+            saldos_iniciais[aba] = saldo_inicial if saldo_inicial is not None else 0
 
-                if 'DATA' in df.columns and 'VALOR' in df.columns:
-                    col_loc = next((c for c in df.columns if 'LOCAL' in c), None)
-                    col_desc = next((c for c in df.columns if 'DESC' in c), None)
+            # Lê os dados a partir da linha DATA
+            df = pd.read_excel(uploaded_file, sheet_name=aba, skiprows=linha_data + 1, header=None)
+            colunas = [str(c).strip().upper() for c in df_raw.iloc[linha_data].values]
+            df.columns = colunas
+            df = df.loc[:, ~df.columns.duplicated()]
 
-                    df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce')
-                    df = df.dropna(subset=['VALOR'])
-                    df = df[df['VALOR'] != 0]
+            if 'DATA' in df.columns and 'VALOR' in df.columns:
+                col_loc = next((c for c in df.columns if 'LOCAL' in c), None)
+                col_desc = next((c for c in df.columns if 'DESC' in c), None)
 
-                    if col_loc and col_desc:
-                        df['DESC_COMPLETA'] = df[col_loc].astype(str) + " - " + df[col_desc].astype(str)
-                    elif col_desc:
-                        df['DESC_COMPLETA'] = df[col_desc].astype(str)
-                    else:
-                        df['DESC_COMPLETA'] = "Sem descrição"
+                df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce')
+                df = df.dropna(subset=['VALOR'])
+                df = df[df['VALOR'] != 0]
 
-                    # Remove linhas de resumo/total
-                    df = df[~df['DESC_COMPLETA'].str.upper().str.contains('|'.join(['VALOR FINAL', 'TOTAL', 'SALDO', 'PAGO', 'PAGAR', 'ATRASADO']))]
+                if col_loc and col_desc:
+                    df['DESC_COMPLETA'] = df[col_loc].astype(str) + " - " + df[col_desc].astype(str)
+                elif col_desc:
+                    df['DESC_COMPLETA'] = df[col_desc].astype(str)
+                else:
+                    df['DESC_COMPLETA'] = "Sem descrição"
 
-                    try:
-                        partes_aba = aba.split('-')
-                        num_mes = meses_map.get(partes_aba[0].strip()[:3].upper(), 1)
-                        ano = int("20" + partes_aba[1].strip()[:2])
-                        df['DATA_REAL'] = df['DATA'].apply(lambda d: datetime(ano, num_mes, int(float(d))) if str(d).replace('.', '').isdigit() else None)
-                    except:
-                        df['DATA_REAL'] = pd.to_datetime(df['DATA'], errors='coerce')
+                # Remove linhas de resumo/total
+                df = df[~df['DESC_COMPLETA'].str.upper().str.contains('|'.join(['VALOR FINAL', 'TOTAL', 'SALDO', 'PAGO', 'PAGAR', 'ATRASADO']))]
 
-                    df['CATEGORIA'] = df['DESC_COMPLETA'].apply(categorizar)
-                    df['TIPO'] = df['DESC_COMPLETA'].apply(identificar_tipo)
-                    df['MES_REF'] = aba
-                    dados_lista.append(df[['DATA_REAL', 'DESC_COMPLETA', 'CATEGORIA', 'VALOR', 'TIPO', 'MES_REF']])
+                try:
+                    partes_aba = aba.split('-')
+                    num_mes = meses_map.get(partes_aba[0].strip()[:3].upper(), 1)
+                    ano = int("20" + partes_aba[1].strip()[:2])
+                    df['DATA_REAL'] = df['DATA'].apply(lambda d: datetime(ano, num_mes, int(float(d))) if str(d).replace('.', '').isdigit() else None)
+                except:
+                    df['DATA_REAL'] = pd.to_datetime(df['DATA'], errors='coerce')
+
+                df['CATEGORIA'] = df['DESC_COMPLETA'].apply(categorizar)
+                df['TIPO'] = df['DESC_COMPLETA'].apply(identificar_tipo)
+                df['MES_REF'] = aba
+                dados_lista.append(df[['DATA_REAL', 'DESC_COMPLETA', 'CATEGORIA', 'VALOR', 'TIPO', 'MES_REF']])
 
         if dados_lista:
             df_final = pd.concat(dados_lista, ignore_index=True)
             mes_sel = st.selectbox("Selecione o Mês para Conferência", options=df_final['MES_REF'].unique(), index=len(df_final['MES_REF'].unique())-1)
             df_mes = df_final[df_final['MES_REF'] == mes_sel].copy()
 
+            saldo_inicial = saldos_iniciais.get(mes_sel, 0)
+
             receitas = df_mes[(df_mes['VALOR'] > 0) & (df_mes['TIPO'] == 'Normal')]['VALOR'].sum()
             despesas = df_mes[(df_mes['VALOR'] < 0) & (df_mes['TIPO'] == 'Normal')]['VALOR'].sum()
 
+            saldo_final = saldo_inicial + receitas + despesas
+
             st.subheader(f"Resumo de {mes_sel}")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Entradas (Receitas)", f"R$ {receitas:,.2f}")
-            m2.metric("Saídas (Despesas)", f"R$ {abs(despesas):,.2f}")
-            m3.metric("Saldo do Mês", f"R$ {(receitas + despesas):,.2f}")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Saldo Inicial", f"R$ {saldo_inicial:,.2f}")
+            m2.metric("Entradas (Receitas)", f"R$ {receitas:,.2f}")
+            m3.metric("Saídas (Despesas)", f"R$ {abs(despesas):,.2f}")
+            m4.metric("Saldo Final", f"R$ {saldo_final:,.2f}")
 
             st.markdown("---")
             st.subheader("🔍 Conferência Detalhada")
