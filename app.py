@@ -5,7 +5,7 @@ from datetime import datetime
 
 st.set_page_config(page_title="Financeiro Léo", layout="wide")
 
-st.title("📊 Dashboard Financeiro com Data Válida - Léo")
+st.title("📊 Dashboard Financeiro Alinhado - Léo")
 
 meses_map = {
     'JAN': 1, 'FEV': 2, 'MAR': 3, 'ABR': 4, 'MAI': 5, 'JUN': 6,
@@ -47,31 +47,20 @@ if uploaded_file:
         dados_lista = []
         saldos_iniciais = {}
         for aba in abas_validas:
+            # Lê a aba inteira para pegar saldo inicial e lançamentos
             df_raw = pd.read_excel(uploaded_file, sheet_name=aba, header=None)
 
-            linha_data = None
-            for i, row in df_raw.iterrows():
-                if "DATA" in [str(v).strip().upper() for v in row.values]:
-                    linha_data = i
-                    break
-            if linha_data is None:
-                continue
-
-            # Detecta saldo inicial na parte acima da linha DATA
+            # Saldo inicial está na linha 1, coluna 2 (C)
             saldo_inicial = None
-            for i in range(linha_data):
-                row = df_raw.iloc[i]
-                for val in row:
-                    if isinstance(val, (int, float)) and val > 0:
-                        saldo_inicial = val
-                        break
-                if saldo_inicial is not None:
-                    break
-            saldos_iniciais[aba] = saldo_inicial if saldo_inicial is not None else 0
+            try:
+                saldo_inicial = float(str(df_raw.iloc[1, 2]).replace('R$', '').replace('.', '').replace(',', '.').strip())
+            except:
+                saldo_inicial = 0
+            saldos_iniciais[aba] = saldo_inicial
 
-            df = pd.read_excel(uploaded_file, sheet_name=aba, skiprows=linha_data + 1, header=None)
-            colunas = [str(c).strip().upper() for c in df_raw.iloc[linha_data].values]
-            df.columns = colunas
+            # Lê lançamentos a partir da linha 9 (onde está o cabeçalho)
+            df = pd.read_excel(uploaded_file, sheet_name=aba, skiprows=8)
+            df.columns = [str(c).strip().upper() for c in df.columns]
             df = df.loc[:, ~df.columns.duplicated()]
 
             if 'DATA' in df.columns and 'VALOR' in df.columns:
@@ -112,7 +101,6 @@ if uploaded_file:
 
             saldo_inicial = saldos_iniciais.get(mes_sel, 0)
 
-            # Somente linhas com DATA_REAL válida entram na soma
             df_validos = df_mes[df_mes['DATA_REAL'].notnull()]
 
             receitas = df_validos[(df_validos['VALOR'] > 0) & (df_validos['TIPO'] == 'Normal')]['VALOR'].sum()
