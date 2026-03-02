@@ -24,9 +24,25 @@ if uploaded_file:
             # Limpa nomes de colunas para evitar erros de texto/espaço
             df.columns = [str(c).strip().upper() for c in df.columns]
             
+            # Verifica se as colunas obrigatórias existem
             if 'DATA' in df.columns and 'VALOR' in df.columns:
+                # Identifica a coluna de descrição (com ou sem acento)
+                col_desc = next((c for c in df.columns if 'DESC' in c), None)
+                
+                # Seleciona as colunas disponíveis
+                cols_to_keep = ['DATA', 'VALOR']
+                if col_desc:
+                    cols_to_keep.append(col_desc)
+                
                 # Mantém só o que importa e remove linhas vazias
-                df = df[['DATA', 'VALOR', 'DESCRIÇÃO']].copy()
+                df = df[cols_to_keep].copy()
+                
+                # Padroniza o nome da coluna de descrição para 'DESCRIÇÃO'
+                if col_desc:
+                    df = df.rename(columns={col_desc: 'DESCRIÇÃO'})
+                else:
+                    df['DESCRIÇÃO'] = "Sem descrição"
+                
                 df = df.dropna(subset=['VALOR'])
                 df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce')
                 df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
@@ -52,9 +68,8 @@ if uploaded_file:
             c2.metric("Despesas", f"R$ {abs(despesas):,.2f}", delta_color="inverse")
             c3.metric("Saldo", f"R$ {(receitas + despesas):,.2f}")
 
-            # Gráfico de Barras Diário (CORRIGIDO)
+            # Gráfico de Barras Diário
             st.markdown("---")
-            # Criamos a coluna 'DIA' para o gráfico
             df_mes['DIA'] = df_mes['DATA'].dt.day
             df_graf = df_mes.groupby('DIA')['VALOR'].sum().reset_index()
             
@@ -74,4 +89,3 @@ if uploaded_file:
         st.error(f"Ocorreu um erro ao processar o arquivo: {e}")
 else:
     st.info("Aguardando o upload do seu Excel... 🚀")
-    
