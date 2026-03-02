@@ -19,7 +19,7 @@ def categorizar(desc):
     if any(x in desc for x in ['MERCADO', 'MAX', 'PADARIA', 'AÇOUGUE', 'COCA', 'NUTELLA']): return '🛒 Mercado'
     if any(x in desc for x in ['IFOOD', 'RESTAURANTE', 'PIZZA', 'LANCHE', 'CERVEJA', 'BAR', 'ALMOÇO', 'JANTA', 'BK']): return '🍔 Lazer/Comida'
     if any(x in desc for x in ['NUBANK', 'CARTAO', 'FATURA', 'ITAU', 'SANTANDER', 'PICPAY']): return '💳 Bancos/Cartão'
-    if any(x in desc for x in ['SALARIO', 'PIX RECEBIDO', 'COMISSAO', 'PAGOU']): return '💰 Receitas'
+    if any(x in desc for x in ['SALARIO', 'PIX RECEBIDO', 'COMISSAO', 'PAGOU', 'RENDIMENTOS']): return '💰 Receitas'
     return '❓ Outros'
 
 uploaded_file = st.file_uploader("Arraste seu arquivo Excel aqui", type=["xlsx"])
@@ -31,53 +31,52 @@ if uploaded_file:
         
         dados_lista = []
         for aba in abas_validas:
-            df = pd.read_excel(uploaded_file, sheet_name=aba, skiprows=9)
+            # Lê a aba completa sem pular nada primeiro
+            df_raw = pd.read_excel(uploaded_file, sheet_name=aba, header=None)
             
-            # Remove colunas duplicadas mantendo a primeira ocorrência
-            df = df.loc[:, ~df.columns.duplicated()]
+            # PROCURA A LINHA ONDE COMEÇA A TABELA (Procura a palavra DATA)
+            linha_inicio = None
+            for i, row in df_raw.iterrows():
+                if "DATA" in row.values:
+                    linha_inicio = i
+                    break
             
-            df.columns = [str(c).strip().upper() for c in df.columns]
-            
-            if 'DATA' in df.columns and 'VALOR' in df.columns:
-                col_desc = next((c for c in df.columns if 'DESC' in c), None)
+            if linha_inicio is not None:
+                # Lê novamente a partir da linha correta
+                df = pd.read_excel(uploaded_file, sheet_name=aba, skiprows=linha_inicio + 1, header=None)
+                # Pega os nomes das colunas da linha que encontramos
+                colunas = df_raw.iloc[linha_inicio].values
+                df.columns = [str(c).strip().upper() for c in colunas]
                 
-                cols_to_keep = ['DATA', 'VALOR']
-                if col_desc:
-                    cols_to_keep.append(col_desc)
+                # Remove colunas duplicadas
+                df = df.loc[:, ~df.columns.duplicated()]
                 
-                df = df[cols_to_keep].copy()
-                
-                # Renomeia a coluna de descrição apenas se não existir 'DESCRIÇÃO'
-                if col_desc and 'DESCRIÇÃO' not in df.columns:
-                    df = df.rename(columns={col_desc: 'DESCRIÇÃO'})
-                elif 'DESCRIÇÃO' not in df.columns:
-                    df['DESCRIÇÃO'] = "Sem descrição"
-                
-                df = df.dropna(subset=['VALOR'])
-                
-                try:
-                    partes_aba = aba.split('-')
-                    nome_mes = partes_aba[0].strip()[:3].upper()
-                    ano = int("20" + partes_aba[1].strip()[:2])
-                    num_mes = meses_map.get(nome_mes, 1)
+                if 'DATA' in df.columns and 'VALOR' in df.columns:
+                    col_desc = next((c for c in df.columns if 'DESC' in c), None)
+                    df = df[['DATA', 'VALOR', (col_desc if col_desc else 'DATA')]].copy()
+                    if col_desc: df = df.rename(columns={col_desc: 'DESCRIÇÃO'})
                     
-                    def montar_data(dia):
-                        try:
-                            d = int(float(dia))
-                            return datetime(ano, num_mes, d)
-                        except: return None
+                    # Limpa linhas vazias e converte valores
+                    df = df.dropna(subset=['VALOR'])
+                    df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce')
+                    df = df.dropna(subset=['VALOR']) # Remove se o valor virou NaN
                     
-                    df['DATA_REAL'] = df['DATA'].apply(montar_data)
-                except:
-                    df['DATA_REAL'] = pd.to_datetime(df['DATA'], errors='coerce')
+                    # Monta a data real
+                    try:
+                        partes_aba = aba.split('-')
+                        nome_mes = partes_aba[0].strip()[:3].upper()
+                        ano = int("20" + partes_aba[1].strip()[:2])
+                        num_mes = meses_map.get(nome_mes, 1)
+                        df['DATA_REAL'] = df['DATA'].apply(lambda d: datetime(ano, num_mes, int(float(d))) if pd.notnull(d) and str(d).replace('.','').isdigit() else None)
+                    except:
+                        df['DATA_REAL'] = pd.to_datetime(df['DATA'], errors='coerce')
 
-                df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce')
-                df['CATEGORIA'] = df['DESCRIÇÃO'].apply(categorizar)
-                df['MES_REF'] = aba
-                dados_lista.append(df)
+                    df['CATEGORIA'] = df['DESCRIÇÃO'].apply(categorizar)
+                    df['MES_REF'] = aba
+                    dados_lista.append(df)
 
         if dados_lista:
-            df_final = pd.concat(dados_lista, ignore_index=True).dropna(subset=['VALOR'])
+            df_final = pd.concat(dados_lista, ignore_index=True)
             mes_sel = st.selectbox("Selecione o Mês", options=df_final['MES_REF'].unique(), index=len(df_final['MES_REF'].unique())-1)
             df_mes = df_final[df_final['MES_REF'] == mes_sel].copy()
             
@@ -87,7 +86,7 @@ if uploaded_file:
             m1, m2, m3 = st.columns(3)
             m1.metric("Receitas", f"R$ {receitas:,.2f}")
             m2.metric("Despesas", f"R$ {abs(despesas):,.2f}", delta_color="inverse")
-            m3.metric("Saldo", f"R$ {(receitas + despesas):,.2f}")
+            m3.metric("Saldo Líquido", f"R$ {(receitas + despesas):,.2f}")
 
             st.markdown("---")
             g1, g2 = st.columns(2)
@@ -98,17 +97,16 @@ if uploaded_file:
                 st.plotly_chart(fig_pie, use_container_width=True)
             with g2:
                 st.subheader("Fluxo Diário")
-                df_mes['DIA_GRAF'] = df_mes['DATA_REAL'].dt.day
-                df_graf = df_mes.groupby('DIA_GRAF')['VALOR'].sum().reset_index()
-                fig_bar = px.bar(df_graf, x='DIA_GRAF', y='VALOR', color='VALOR', color_continuous_scale=['#ff5252', '#00c853'])
+                df_graf = df_mes.groupby(df_mes['DATA_REAL'].dt.day)['VALOR'].sum().reset_index()
+                fig_bar = px.bar(df_graf, x='DATA_REAL', y='VALOR', color='VALOR', color_continuous_scale=['#ff5252', '#00c853'])
                 st.plotly_chart(fig_bar, use_container_width=True)
 
             st.subheader("📝 Detalhes dos Lançamentos")
             df_tab = df_mes.copy()
-            df_tab['DATA'] = df_tab['DATA_REAL'].dt.strftime('%d/%m/%Y')
-            st.dataframe(df_tab[['DATA', 'DESCRIÇÃO', 'CATEGORIA', 'VALOR']].sort_values('DATA'), use_container_width=True)
+            df_tab['DATA_FORMAT'] = df_tab['DATA_REAL'].dt.strftime('%d/%m/%Y')
+            st.dataframe(df_tab[['DATA_FORMAT', 'DESCRIÇÃO', 'CATEGORIA', 'VALOR']].sort_values('DATA_FORMAT'), use_container_width=True)
         else:
-            st.error("Não encontrei dados válidos.")
+            st.error("Não encontrei a tabela de lançamentos. Verifique se existe a coluna 'DATA'.")
     except Exception as e:
         st.error(f"Erro: {e}")
 else:
