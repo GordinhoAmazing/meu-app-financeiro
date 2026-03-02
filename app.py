@@ -5,7 +5,7 @@ from datetime import datetime
 
 st.set_page_config(page_title="Financeiro Léo", layout="wide")
 
-st.title("📊 Dashboard Financeiro Inteligente - Léo")
+st.title("📊 Dashboard Financeiro de Precisão - Léo")
 
 meses_map = {
     'JAN': 1, 'FEV': 2, 'MAR': 3, 'ABR': 4, 'MAI': 5, 'JUN': 6,
@@ -28,90 +28,77 @@ if uploaded_file:
     try:
         xls = pd.ExcelFile(uploaded_file)
         abas_validas = [s for s in xls.sheet_names if '-' in s]
-
+        
         dados_lista = []
         for aba in abas_validas:
             df_raw = pd.read_excel(uploaded_file, sheet_name=aba, header=None)
-
-            # Procura a linha onde começa a tabela (linha que contém "DATA")
+            
             linha_inicio = None
             for i, row in df_raw.iterrows():
-                if "DATA" in row.values:
+                if "DATA" in [str(v).strip().upper() for v in row.values]:
                     linha_inicio = i
                     break
-
+            
             if linha_inicio is not None:
                 df = pd.read_excel(uploaded_file, sheet_name=aba, skiprows=linha_inicio + 1, header=None)
-                colunas = df_raw.iloc[linha_inicio].values
-                df.columns = [str(c).strip().upper() for c in colunas]
-
-                # Remove colunas duplicadas mantendo a primeira ocorrência
+                colunas = [str(c).strip().upper() for c in df_raw.iloc[linha_inicio].values]
+                df.columns = colunas
                 df = df.loc[:, ~df.columns.duplicated()]
-
+                
                 if 'DATA' in df.columns and 'VALOR' in df.columns:
+                    # Pega Local e Descrição para não perder nada
+                    col_loc = next((c for c in df.columns if 'LOCAL' in c), None)
                     col_desc = next((c for c in df.columns if 'DESC' in c), None)
-                    cols_to_keep = ['DATA', 'VALOR']
-                    if col_desc:
-                        cols_to_keep.append(col_desc)
-                    df = df[cols_to_keep].copy()
-
-                    # Renomeia a coluna de descrição apenas se não existir 'DESCRIÇÃO'
-                    if col_desc and 'DESCRIÇÃO' not in df.columns:
-                        df = df.rename(columns={col_desc: 'DESCRIÇÃO'})
-                    elif 'DESCRIÇÃO' not in df.columns:
-                        df['DESCRIÇÃO'] = "Sem descrição"
-
-                    df = df.dropna(subset=['VALOR'])
+                    
                     df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce')
                     df = df.dropna(subset=['VALOR'])
-
+                    df = df[df['VALOR'] != 0] # Ignora zeros que não afetam saldo
+                    
+                    # Cria uma descrição completa
+                    df['DESC_COMPLETA'] = df[col_loc].astype(str) + " - " + df[col_desc].astype(str) if col_loc and col_desc else df[col_desc if col_desc else 'DATA'].astype(str)
+                    
+                    # Monta Data
                     try:
                         partes_aba = aba.split('-')
-                        nome_mes = partes_aba[0].strip()[:3].upper()
+                        num_mes = meses_map.get(partes_aba[0].strip()[:3].upper(), 1)
                         ano = int("20" + partes_aba[1].strip()[:2])
-                        num_mes = meses_map.get(nome_mes, 1)
-                        df['DATA_REAL'] = df['DATA'].apply(lambda d: datetime(ano, num_mes, int(float(d))) if pd.notnull(d) and str(d).replace('.', '').isdigit() else None)
+                        df['DATA_REAL'] = df['DATA'].apply(lambda d: datetime(ano, num_mes, int(float(d))) if str(d).replace('.','').isdigit() else None)
                     except:
                         df['DATA_REAL'] = pd.to_datetime(df['DATA'], errors='coerce')
 
-                    df['CATEGORIA'] = df['DESCRIÇÃO'].apply(categorizar)
+                    df['CATEGORIA'] = df['DESC_COMPLETA'].apply(categorizar)
                     df['MES_REF'] = aba
-                    dados_lista.append(df)
+                    dados_lista.append(df[['DATA_REAL', 'DESC_COMPLETA', 'CATEGORIA', 'VALOR', 'MES_REF']])
 
         if dados_lista:
-            df_final = pd.concat(dados_lista, ignore_index=True)
-            mes_sel = st.selectbox("Selecione o Mês", options=df_final['MES_REF'].unique(), index=len(df_final['MES_REF'].unique()) - 1)
+            df_final = pd.concat(dados_lista, ignore_index=True).dropna(subset=['DATA_REAL'])
+            mes_sel = st.selectbox("Selecione o Mês para Conferência", options=df_final['MES_REF'].unique(), index=len(df_final['MES_REF'].unique())-1)
             df_mes = df_final[df_final['MES_REF'] == mes_sel].copy()
-
+            
             receitas = df_mes[df_mes['VALOR'] > 0]['VALOR'].sum()
             despesas = df_mes[df_mes['VALOR'] < 0]['VALOR'].sum()
-
+            
+            st.subheader(f"Resumo de {mes_sel}")
             m1, m2, m3 = st.columns(3)
-            m1.metric("Receitas", f"R$ {receitas:,.2f}")
-            m2.metric("Despesas", f"R$ {abs(despesas):,.2f}", delta_color="inverse")
-            m3.metric("Saldo", f"R$ {(receitas + despesas):,.2f}")
+            m1.metric("Entradas (Receitas)", f"R$ {receitas:,.2f}")
+            m2.metric("Saídas (Despesas)", f"R$ {abs(despesas):,.2f}")
+            m3.metric("Saldo do Mês", f"R$ {(receitas + despesas):,.2f}")
 
             st.markdown("---")
-            g1, g2 = st.columns(2)
-            with g1:
-                st.subheader("Gastos por Categoria")
-                df_gastos = df_mes[df_mes['VALOR'] < 0].groupby('CATEGORIA')['VALOR'].sum().abs().reset_index()
-                fig_pie = px.pie(df_gastos, values='VALOR', names='CATEGORIA', hole=0.4)
-                st.plotly_chart(fig_pie, use_container_width=True)
-            with g2:
-                st.subheader("Fluxo Diário")
-                df_mes['DIA_GRAF'] = df_mes['DATA_REAL'].dt.day
-                df_graf = df_mes.groupby('DIA_GRAF')['VALOR'].sum().reset_index()
-                fig_bar = px.bar(df_graf, x='DIA_GRAF', y='VALOR', color='VALOR', color_continuous_scale=['#ff5252', '#00c853'])
-                st.plotly_chart(fig_bar, use_container_width=True)
-
-            st.subheader("📝 Detalhes dos Lançamentos")
+            st.subheader("🔍 Conferência Detalhada")
+            st.write("Compare os valores abaixo com seu Excel:")
             df_tab = df_mes.copy()
             df_tab['DATA'] = df_tab['DATA_REAL'].dt.strftime('%d/%m/%Y')
-            st.dataframe(df_tab[['DATA', 'DESCRIÇÃO', 'CATEGORIA', 'VALOR']].sort_values('DATA'), use_container_width=True)
+            st.dataframe(df_tab[['DATA', 'DESC_COMPLETA', 'CATEGORIA', 'VALOR']].sort_values('DATA'), use_container_width=True)
+            
+            # Botão para baixar e conferir no Excel se precisar
+            csv = df_tab.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Baixar Dados deste Mês (CSV)", csv, f"conferencia_{mes_sel}.csv", "text/csv")
+
         else:
-            st.error("Não encontrei a tabela de lançamentos. Verifique se existe a coluna 'DATA'.")
+            st.error("Ainda não consegui alinhar os dados. Verifique se a palavra 'DATA' está na coluna A da sua tabela.")
     except Exception as e:
-        st.error(f"Erro: {e}")
+        st.error(f"Erro técnico: {e}")
 else:
-    st.info("Aguardando o upload do seu Excel... 🚀")
+    st.info("Aguardando seu arquivo Excel para bater os números... 🚀")
+    
