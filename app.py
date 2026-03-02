@@ -1,21 +1,26 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from datetime import datetime
 
 st.set_page_config(page_title="Financeiro Léo", layout="wide")
 
 st.title("📊 Dashboard Financeiro Inteligente - Léo")
 
+# Dicionário para converter nome da aba em número do mês
+meses_map = {
+    'JAN': 1, 'FEV': 2, 'MAR': 3, 'ABR': 4, 'MAI': 5, 'JUN': 6,
+    'JUL': 7, 'AGO': 8, 'SET': 9, 'OUT': 10, 'NOV': 11, 'DEZ': 12
+}
+
 def categorizar(desc):
     desc = str(desc).upper()
-    if any(x in desc for x in ['MRV', 'AGUA', 'ENERGIA', 'CONDOMINIO', 'ALUGUEL', 'REFORMA']): return '🏠 Casa/Moradia'
-    if any(x in desc for x in ['POSTO', 'GASOLINA', 'COMBUSTIVEL', 'UBER', 'MECANICO', 'ESTACIONAMENTO']): return '🚗 Transporte/Carro'
-    if any(x in desc for x in ['MERCADO', 'MAX', 'SUPERMERCADO', 'PADARIA', 'AÇOUGUE']): return '🛒 Alimentação/Mercado'
-    if any(x in desc for x in ['IFOOD', 'RESTAURANTE', 'PIZZA', 'LANCHE', 'CERVEJA', 'BAR']): return '🍔 Lazer/Comida Fora'
-    if any(x in desc for x in ['NUBANK', 'CARTAO', 'FATURA', 'ITAU', 'SANTANDER']): return '💳 Cartão/Bancos'
-    if any(x in desc for x in ['SALARIO', 'PIX RECEBIDO', 'TRANSFERENCIA RECEBIDA', 'COMISSAO']): return '💰 Receitas'
-    if any(x in desc for x in ['CURSO', 'FACULDADE', 'LIVRO', 'TREINAMENTO']): return '📚 Educação'
-    if any(x in desc for x in ['FARMACIA', 'MEDICO', 'EXAME', 'HOSPITAL']): return '🏥 Saúde'
+    if any(x in desc for x in ['MRV', 'AGUA', 'ENERGIA', 'CONDOMINIO', 'ALUGUEL', 'REFORMA', 'CASA']): return '🏠 Casa'
+    if any(x in desc for x in ['POSTO', 'GASOLINA', 'COMBUSTIVEL', 'UBER', 'MECANICO', 'ESTACIONAMENTO', 'PLAZA', 'IGUATEMI']): return '🚗 Transporte'
+    if any(x in desc for x in ['MERCADO', 'MAX', 'PADARIA', 'AÇOUGUE', 'COCA', 'NUTELLA']): return '🛒 Mercado'
+    if any(x in desc for x in ['IFOOD', 'RESTAURANTE', 'PIZZA', 'LANCHE', 'CERVEJA', 'BAR', 'ALMOÇO', 'JANTA', 'BK']): return '🍔 Lazer/Comida'
+    if any(x in desc for x in ['NUBANK', 'CARTAO', 'FATURA', 'ITAU', 'SANTANDER', 'PICPAY']): return '💳 Bancos/Cartão'
+    if any(x in desc for x in ['SALARIO', 'PIX RECEBIDO', 'COMISSAO', 'PAGOU']): return '💰 Receitas'
     return '❓ Outros'
 
 uploaded_file = st.file_uploader("Arraste seu arquivo Excel aqui", type=["xlsx"])
@@ -28,65 +33,74 @@ if uploaded_file:
         dados_lista = []
         for aba in abas_validas:
             df = pd.read_excel(uploaded_file, sheet_name=aba, skiprows=9)
-            
-            # Remove colunas duplicadas mantendo a primeira ocorrência
             df = df.loc[:, ~df.columns.duplicated()]
-            
             df.columns = [str(c).strip().upper() for c in df.columns]
             
             if 'DATA' in df.columns and 'VALOR' in df.columns:
                 col_desc = next((c for c in df.columns if 'DESC' in c), None)
-                
-                cols_to_keep = ['DATA', 'VALOR']
-                if col_desc:
-                    cols_to_keep.append(col_desc)
-                
-                df = df[cols_to_keep].copy()
-                
-                if col_desc:
-                    df = df.rename(columns={col_desc: 'DESCRIÇÃO'})
-                else:
-                    if 'DESCRIÇÃO' not in df.columns:
-                        df['DESCRIÇÃO'] = "Sem descrição"
+                df = df[['DATA', 'VALOR', (col_desc if col_desc else 'DATA')]].copy()
+                if col_desc: df = df.rename(columns={col_desc: 'DESCRIÇÃO'})
                 
                 df = df.dropna(subset=['VALOR'])
+                
+                # LÓGICA DA DATA: Monta a data real usando o dia da coluna e o nome da aba
+                try:
+                    partes_aba = aba.split('-')
+                    nome_mes = partes_aba[0].strip()[:3].upper()
+                    ano = int("20" + partes_aba[1].strip()[:2])
+                    num_mes = meses_map.get(nome_mes, 1)
+                    
+                    def montar_data(dia):
+                        try:
+                            d = int(float(dia))
+                            return datetime(ano, num_mes, d)
+                        except: return None
+                    
+                    df['DATA_REAL'] = df['DATA'].apply(montar_data)
+                except:
+                    df['DATA_REAL'] = pd.to_datetime(df['DATA'], errors='coerce')
+
                 df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce')
-                df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')
                 df['CATEGORIA'] = df['DESCRIÇÃO'].apply(categorizar)
                 df['MES_REF'] = aba
                 dados_lista.append(df)
 
         if dados_lista:
-            df_final = pd.concat(dados_lista, ignore_index=True).dropna(subset=['DATA', 'VALOR'])
-            
-            meses = df_final['MES_REF'].unique()
-            mes_sel = st.selectbox("Selecione o Mês", options=meses, index=len(meses)-1)
-            
+            df_final = pd.concat(dados_lista, ignore_index=True).dropna(subset=['VALOR'])
+            mes_sel = st.selectbox("Selecione o Mês", options=df_final['MES_REF'].unique(), index=len(df_final['MES_REF'].unique())-1)
             df_mes = df_final[df_final['MES_REF'] == mes_sel].copy()
             
             receitas = df_mes[df_mes['VALOR'] > 0]['VALOR'].sum()
             despesas = df_mes[df_mes['VALOR'] < 0]['VALOR'].sum()
             
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Receitas", f"R$ {receitas:,.2f}")
-            c2.metric("Despesas", f"R$ {abs(despesas):,.2f}", delta_color="inverse")
-            c3.metric("Saldo", f"R$ {(receitas + despesas):,.2f}")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Receitas", f"R$ {receitas:,.2f}")
+            m2.metric("Despesas", f"R$ {abs(despesas):,.2f}", delta_color="inverse")
+            m3.metric("Saldo", f"R$ {(receitas + despesas):,.2f}")
 
             st.markdown("---")
-            df_mes['DIA'] = df_mes['DATA'].dt.day
-            df_graf = df_mes.groupby('DIA')['VALOR'].sum().reset_index()
-            
-            fig = px.bar(df_graf, x='DIA', y='VALOR', 
-                         title=f"Movimentação Diária - {mes_sel}",
-                         labels={'DIA': 'Dia do Mês', 'VALOR': 'Valor Líquido (R$)'},
-                         color='VALOR', color_continuous_scale=['#ff5252', '#00c853'])
-            st.plotly_chart(fig, use_container_width=True)
+            g1, g2 = st.columns(2)
+            with g1:
+                st.subheader("Gastos por Categoria")
+                df_gastos = df_mes[df_mes['VALOR'] < 0].groupby('CATEGORIA')['VALOR'].sum().abs().reset_index()
+                fig_pie = px.pie(df_gastos, values='VALOR', names='CATEGORIA', hole=0.4)
+                st.plotly_chart(fig_pie, use_container_width=True)
+            with g2:
+                st.subheader("Fluxo Diário")
+                df_mes['DIA_GRAF'] = df_mes['DATA_REAL'].dt.day
+                df_graf = df_mes.groupby('DIA_GRAF')['VALOR'].sum().reset_index()
+                fig_bar = px.bar(df_graf, x='DIA_GRAF', y='VALOR', color='VALOR', color_continuous_scale=['#ff5252', '#00c853'])
+                st.plotly_chart(fig_bar, use_container_width=True)
 
             st.subheader("📝 Detalhes dos Lançamentos")
-            st.dataframe(df_mes[['DATA', 'DESCRIÇÃO', 'CATEGORIA', 'VALOR']].sort_values('DATA'), use_container_width=True)
+            # Formata a data para aparecer bonitinha na tabela
+            df_tab = df_mes.copy()
+            df_tab['DATA'] = df_tab['DATA_REAL'].dt.strftime('%d/%m/%Y')
+            st.dataframe(df_tab[['DATA', 'DESCRIÇÃO', 'CATEGORIA', 'VALOR']].sort_values('DATA'), use_container_width=True)
         else:
-            st.error("Não encontrei dados válidos. Verifique o arquivo.")
+            st.error("Não encontrei dados válidos.")
     except Exception as e:
         st.error(f"Erro: {e}")
 else:
     st.info("Aguardando o upload do seu Excel... 🚀")
+    
