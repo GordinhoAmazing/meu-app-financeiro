@@ -28,45 +28,49 @@ if uploaded_file:
     try:
         xls = pd.ExcelFile(uploaded_file)
         abas_validas = [s for s in xls.sheet_names if '-' in s]
-        
+
         dados_lista = []
         for aba in abas_validas:
             df_raw = pd.read_excel(uploaded_file, sheet_name=aba, header=None)
-            
-            # PROCURA A LINHA ONDE COMEÇA A TABELA (Procura a palavra DATA)
+
+            # Procura a linha onde começa a tabela (linha que contém "DATA")
             linha_inicio = None
             for i, row in df_raw.iterrows():
                 if "DATA" in row.values:
                     linha_inicio = i
                     break
-            
+
             if linha_inicio is not None:
                 df = pd.read_excel(uploaded_file, sheet_name=aba, skiprows=linha_inicio + 1, header=None)
                 colunas = df_raw.iloc[linha_inicio].values
                 df.columns = [str(c).strip().upper() for c in colunas]
-                
-                # Remove colunas duplicadas
+
+                # Remove colunas duplicadas mantendo a primeira ocorrência
                 df = df.loc[:, ~df.columns.duplicated()]
-                
+
                 if 'DATA' in df.columns and 'VALOR' in df.columns:
                     col_desc = next((c for c in df.columns if 'DESC' in c), None)
-                    df = df[['DATA', 'VALOR', (col_desc if col_desc else 'DATA')]].copy()
-                    
+                    cols_to_keep = ['DATA', 'VALOR']
+                    if col_desc:
+                        cols_to_keep.append(col_desc)
+                    df = df[cols_to_keep].copy()
+
+                    # Renomeia a coluna de descrição apenas se não existir 'DESCRIÇÃO'
                     if col_desc and 'DESCRIÇÃO' not in df.columns:
                         df = df.rename(columns={col_desc: 'DESCRIÇÃO'})
                     elif 'DESCRIÇÃO' not in df.columns:
                         df['DESCRIÇÃO'] = "Sem descrição"
-                    
+
                     df = df.dropna(subset=['VALOR'])
                     df['VALOR'] = pd.to_numeric(df['VALOR'], errors='coerce')
                     df = df.dropna(subset=['VALOR'])
-                    
+
                     try:
                         partes_aba = aba.split('-')
                         nome_mes = partes_aba[0].strip()[:3].upper()
                         ano = int("20" + partes_aba[1].strip()[:2])
                         num_mes = meses_map.get(nome_mes, 1)
-                        df['DATA_REAL'] = df['DATA'].apply(lambda d: datetime(ano, num_mes, int(float(d))) if pd.notnull(d) and str(d).replace('.','').isdigit() else None)
+                        df['DATA_REAL'] = df['DATA'].apply(lambda d: datetime(ano, num_mes, int(float(d))) if pd.notnull(d) and str(d).replace('.', '').isdigit() else None)
                     except:
                         df['DATA_REAL'] = pd.to_datetime(df['DATA'], errors='coerce')
 
@@ -76,12 +80,12 @@ if uploaded_file:
 
         if dados_lista:
             df_final = pd.concat(dados_lista, ignore_index=True)
-            mes_sel = st.selectbox("Selecione o Mês", options=df_final['MES_REF'].unique(), index=len(df_final['MES_REF'].unique())-1)
+            mes_sel = st.selectbox("Selecione o Mês", options=df_final['MES_REF'].unique(), index=len(df_final['MES_REF'].unique()) - 1)
             df_mes = df_final[df_final['MES_REF'] == mes_sel].copy()
-            
+
             receitas = df_mes[df_mes['VALOR'] > 0]['VALOR'].sum()
             despesas = df_mes[df_mes['VALOR'] < 0]['VALOR'].sum()
-            
+
             m1, m2, m3 = st.columns(3)
             m1.metric("Receitas", f"R$ {receitas:,.2f}")
             m2.metric("Despesas", f"R$ {abs(despesas):,.2f}", delta_color="inverse")
