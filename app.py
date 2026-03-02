@@ -32,14 +32,26 @@ if uploaded_file:
         dados_lista = []
         for aba in abas_validas:
             df = pd.read_excel(uploaded_file, sheet_name=aba, skiprows=9)
-            df = df.loc[:, ~df.columns.duplicated()]  # Remove colunas duplicadas
+            
+            # Remove colunas duplicadas mantendo a primeira ocorrência
+            df = df.loc[:, ~df.columns.duplicated()]
             
             df.columns = [str(c).strip().upper() for c in df.columns]
             
             if 'DATA' in df.columns and 'VALOR' in df.columns:
                 col_desc = next((c for c in df.columns if 'DESC' in c), None)
-                df = df[['DATA', 'VALOR', (col_desc if col_desc else 'DATA')]].copy()
-                if col_desc: df = df.rename(columns={col_desc: 'DESCRIÇÃO'})
+                
+                cols_to_keep = ['DATA', 'VALOR']
+                if col_desc:
+                    cols_to_keep.append(col_desc)
+                
+                df = df[cols_to_keep].copy()
+                
+                # Renomeia a coluna de descrição apenas se não existir 'DESCRIÇÃO'
+                if col_desc and 'DESCRIÇÃO' not in df.columns:
+                    df = df.rename(columns={col_desc: 'DESCRIÇÃO'})
+                elif 'DESCRIÇÃO' not in df.columns:
+                    df['DESCRIÇÃO'] = "Sem descrição"
                 
                 df = df.dropna(subset=['VALOR'])
                 
