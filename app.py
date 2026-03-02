@@ -5,7 +5,7 @@ from datetime import datetime
 
 st.set_page_config(page_title="Financeiro Léo", layout="wide")
 
-st.title("📊 Dashboard Financeiro com Saldo Inicial - Léo")
+st.title("📊 Dashboard Financeiro com Data Válida - Léo")
 
 meses_map = {
     'JAN': 1, 'FEV': 2, 'MAR': 3, 'ABR': 4, 'MAI': 5, 'JUN': 6,
@@ -49,7 +49,6 @@ if uploaded_file:
         for aba in abas_validas:
             df_raw = pd.read_excel(uploaded_file, sheet_name=aba, header=None)
 
-            # Detecta saldo inicial: valores numéricos antes da linha "DATA"
             linha_data = None
             for i, row in df_raw.iterrows():
                 if "DATA" in [str(v).strip().upper() for v in row.values]:
@@ -58,7 +57,7 @@ if uploaded_file:
             if linha_data is None:
                 continue
 
-            # Procura saldo inicial na parte acima da linha DATA
+            # Detecta saldo inicial na parte acima da linha DATA
             saldo_inicial = None
             for i in range(linha_data):
                 row = df_raw.iloc[i]
@@ -70,7 +69,6 @@ if uploaded_file:
                     break
             saldos_iniciais[aba] = saldo_inicial if saldo_inicial is not None else 0
 
-            # Lê os dados a partir da linha DATA
             df = pd.read_excel(uploaded_file, sheet_name=aba, skiprows=linha_data + 1, header=None)
             colunas = [str(c).strip().upper() for c in df_raw.iloc[linha_data].values]
             df.columns = colunas
@@ -114,8 +112,11 @@ if uploaded_file:
 
             saldo_inicial = saldos_iniciais.get(mes_sel, 0)
 
-            receitas = df_mes[(df_mes['VALOR'] > 0) & (df_mes['TIPO'] == 'Normal')]['VALOR'].sum()
-            despesas = df_mes[(df_mes['VALOR'] < 0) & (df_mes['TIPO'] == 'Normal')]['VALOR'].sum()
+            # Somente linhas com DATA_REAL válida entram na soma
+            df_validos = df_mes[df_mes['DATA_REAL'].notnull()]
+
+            receitas = df_validos[(df_validos['VALOR'] > 0) & (df_validos['TIPO'] == 'Normal')]['VALOR'].sum()
+            despesas = df_validos[(df_validos['VALOR'] < 0) & (df_validos['TIPO'] == 'Normal')]['VALOR'].sum()
 
             saldo_final = saldo_inicial + receitas + despesas
 
