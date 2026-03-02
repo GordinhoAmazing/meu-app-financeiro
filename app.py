@@ -24,12 +24,13 @@ def categorizar(desc):
 
 def identificar_tipo(desc):
     desc = str(desc).upper()
-    # Palavras que indicam transferências internas
     transfer_keywords = ['TRANSF', 'TRANSFERENCIA', 'TRANSFERÊNCIA', 'TED', 'DOC', 'PIX']
-    # Palavras que indicam faturas de cartão
     fatura_keywords = ['FATURA', 'CARTAO', 'CARTÃO', 'CREDITO', 'NUBANK', 'ITAU', 'SANTANDER']
+    resumo_keywords = ['VALOR FINAL', 'TOTAL', 'SALDO', 'PAGO', 'PAGO', 'PAGAR', 'ATRASADO']
 
-    if any(k in desc for k in transfer_keywords):
+    if any(k in desc for k in resumo_keywords):
+        return 'Resumo/Total'
+    elif any(k in desc for k in transfer_keywords):
         return 'Transferência Interna'
     elif any(k in desc for k in fatura_keywords):
         return 'Fatura Cartão'
@@ -74,6 +75,9 @@ if uploaded_file:
                     else:
                         df['DESC_COMPLETA'] = "Sem descrição"
 
+                    # Remove linhas de resumo/total
+                    df = df[~df['DESC_COMPLETA'].str.upper().str.contains('|'.join(['VALOR FINAL', 'TOTAL', 'SALDO', 'PAGO', 'PAGAR', 'ATRASADO']))]
+
                     try:
                         partes_aba = aba.split('-')
                         num_mes = meses_map.get(partes_aba[0].strip()[:3].upper(), 1)
@@ -92,7 +96,6 @@ if uploaded_file:
             mes_sel = st.selectbox("Selecione o Mês para Conferência", options=df_final['MES_REF'].unique(), index=len(df_final['MES_REF'].unique())-1)
             df_mes = df_final[df_final['MES_REF'] == mes_sel].copy()
 
-            # Somar apenas lançamentos do tipo Normal para receitas e despesas
             receitas = df_mes[(df_mes['VALOR'] > 0) & (df_mes['TIPO'] == 'Normal')]['VALOR'].sum()
             despesas = df_mes[(df_mes['VALOR'] < 0) & (df_mes['TIPO'] == 'Normal')]['VALOR'].sum()
 
