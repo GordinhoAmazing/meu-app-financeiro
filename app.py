@@ -7,7 +7,6 @@ st.set_page_config(page_title="Financeiro Léo", layout="wide")
 
 st.title("📊 Dashboard Financeiro Inteligente - Léo")
 
-# Dicionário para converter nome da aba em número do mês
 meses_map = {
     'JAN': 1, 'FEV': 2, 'MAR': 3, 'ABR': 4, 'MAI': 5, 'JUN': 6,
     'JUL': 7, 'AGO': 8, 'SET': 9, 'OUT': 10, 'NOV': 11, 'DEZ': 12
@@ -33,7 +32,8 @@ if uploaded_file:
         dados_lista = []
         for aba in abas_validas:
             df = pd.read_excel(uploaded_file, sheet_name=aba, skiprows=9)
-            df = df.loc[:, ~df.columns.duplicated()]
+            df = df.loc[:, ~df.columns.duplicated()]  # Remove colunas duplicadas
+            
             df.columns = [str(c).strip().upper() for c in df.columns]
             
             if 'DATA' in df.columns and 'VALOR' in df.columns:
@@ -43,7 +43,6 @@ if uploaded_file:
                 
                 df = df.dropna(subset=['VALOR'])
                 
-                # LÓGICA DA DATA: Monta a data real usando o dia da coluna e o nome da aba
                 try:
                     partes_aba = aba.split('-')
                     nome_mes = partes_aba[0].strip()[:3].upper()
@@ -93,7 +92,6 @@ if uploaded_file:
                 st.plotly_chart(fig_bar, use_container_width=True)
 
             st.subheader("📝 Detalhes dos Lançamentos")
-            # Formata a data para aparecer bonitinha na tabela
             df_tab = df_mes.copy()
             df_tab['DATA'] = df_tab['DATA_REAL'].dt.strftime('%d/%m/%Y')
             st.dataframe(df_tab[['DATA', 'DESCRIÇÃO', 'CATEGORIA', 'VALOR']].sort_values('DATA'), use_container_width=True)
@@ -103,4 +101,3 @@ if uploaded_file:
         st.error(f"Erro: {e}")
 else:
     st.info("Aguardando o upload do seu Excel... 🚀")
-    
